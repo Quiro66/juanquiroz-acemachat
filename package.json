@@ -1,0 +1,11 @@
+{
+  "name": "juanquiroz-chat",
+  "version": "1.0.0",
+  "private": true,
+  "packageManager": "pnpm@10.20.0",
+  "scripts": {
+    "dev": "pnpm --parallel --filter @acema/web --filter @acema/api dev",
+    "build": "pnpm --recursive build",
+    "lint": "pnpm --recursive lint"
+  }
+}

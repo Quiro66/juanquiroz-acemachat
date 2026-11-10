@@ -1,0 +1,23 @@
+cat > docker-compose.yml <<'EOF'
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: acema-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: juanquiroz
+      POSTGRES_PASSWORD: "juan quiroz_dev_password"
+      POSTGRES_DB: juanquiroz_chat
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U juanquiroz -d juanquiroz_chat"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+EOF

@@ -1,0 +1,155 @@
+
+import type { Server, Socket } from "socket.io";
+import { prisma } from "../config/prisma";
+import {
+  conversationIdSchema,
+  createMessageSchema,
+} from "../modules/messages/messages.schemas";
+import { createMessage } from "../modules/messages/messages.service";
+
+interface SocketResponse {
+  success: boolean;
+  message: string;
+  data?: unknown;
+}
+
+export function registerSocketHandlers(
+  io: Server,
+  socket: Socket,
+): void {
+  socket.on(
+    "conversation:join",
+    async (conversationId: unknown, callback?: (response: SocketResponse) => void) => {
+      try {
+        const validation = conversationIdSchema.safeParse({
+          conversationId,
+        });
+
+        if (!validation.success) {
+          callback?.({
+            success: false,
+            message: "ID de conversación inválido",
+          });
+          return;
+        }
+
+        const userId = socket.data.userId as string;
+
+        const participant = await prisma.conversationParticipant.findUnique({
+          where: {
+            userId_conversationId: {
+              userId,
+              conversationId: validation.data.conversationId,
+            },
+          },
+        });
+
+        if (!participant) {
+          callback?.({
+            success: false,
+            message: "No tienes acceso a esta conversación",
+          });
+          return;
+        }
+
+        await socket.join(`conversation:${validation.data.conversationId}`);
+
+        callback?.({
+          success: true,
+          message: "Te has unido a la conversación",
+        });
+      } catch (error) {
+        console.error("Error al unirse a conversación:", error);
+
+        callback?.({
+          success: false,
+          message: "No se pudo ingresar a la conversación",
+        });
+      }
+    },
+  );
+
+  socket.on("conversation:leave", async (conversationId: unknown) => {
+    const validation = conversationIdSchema.safeParse({
+      conversationId,
+    });
+
+    if (!validation.success) return;
+
+    await socket.leave(`conversation:${validation.data.conversationId}`);
+  });
+
+  // Enviar mensajes en tiempo real.
+  socket.on(
+    "message:send",
+    async (payload: unknown, callback?: (response: SocketResponse) => void) => {
+      try {
+        if (typeof payload !== "object" || payload === null) {
+          callback?.({
+            success: false,
+            message: "Datos del mensaje inválidos",
+          });
+          return;
+        }
+
+        const data = payload as Record<string, unknown>;
+
+        const conversationValidation = conversationIdSchema.safeParse({
+          conversationId: data.conversationId,
+        });
+
+        const messageValidation = createMessageSchema.safeParse({
+          content: data.content,
+        });
+
+        if (!conversationValidation.success || !messageValidation.success) {
+          callback?.({
+            success: false,
+            message: "Datos del mensaje inválidos",
+          });
+          return;
+        }
+
+        const userId = socket.data.userId as string;
+        const conversationId = conversationValidation.data.conversationId;
+
+        // El servicio verifica la participación y guarda el mensaje.
+        const message = await createMessage({
+          conversationId,
+          currentUserId: userId,
+          input: messageValidation.data,
+        });
+
+        // Notificar a los participantes conectados a la sala.
+        io.to(`conversation:${conversationId}`).emit(
+          "message:new",
+          message,
+        );
+
+        callback?.({
+          success: true,
+          message: "Mensaje enviado correctamente",
+          data: message,
+        });
+      } catch (error) {
+        if (
+          error instanceof Error &&
+          error.message === "CONVERSATION_NOT_FOUND"
+        ) {
+          callback?.({
+            success: false,
+            message: "Conversación no encontrada o sin autorización",
+          });
+          return;
+        }
+
+        console.error("Error al enviar mensaje por socket:", error);
+
+        callback?.({
+          success: false,
+          message: "No se pudo enviar el mensaje",
+        });
+      }
+    },
+  );
+}
